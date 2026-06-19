@@ -51,13 +51,35 @@ def validate_upload(filename: str, file_bytes: bytes) -> str:
 
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
+    """
+    Extracts visible text AND hyperlink URLs (e.g. LinkedIn/GitHub icons that
+    are clickable links but have no visible URL text). pdfplumber's
+    extract_text() only captures visible text, so links rendered as icons
+    or generic anchor text ("LinkedIn", "GitHub") would otherwise be lost.
+    We append a labeled "Hyperlinks found in document" block so the
+    structuring step (groq_service.py) can match URLs to the right fields.
+    """
     text_parts = []
+    all_links: list[str] = []
+
     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
         for page in pdf.pages:
             page_text = page.extract_text()
             if page_text:
                 text_parts.append(page_text)
-    return "\n".join(text_parts).strip()
+
+            for hyperlink in getattr(page, "hyperlinks", []):
+                uri = hyperlink.get("uri")
+                if uri and uri not in all_links:
+                    all_links.append(uri)
+
+    full_text = "\n".join(text_parts).strip()
+
+    if all_links:
+        links_block = "\n".join(f"- {url}" for url in all_links)
+        full_text += f"\n\n[Hyperlinks found in document, in document order — use these to fill linkedin_url, github_url, and project links; match by domain/path]\n{links_block}"
+
+    return full_text
 
 
 def extract_text_from_docx(file_bytes: bytes) -> str:

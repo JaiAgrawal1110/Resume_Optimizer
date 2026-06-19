@@ -106,6 +106,18 @@ source — do not omit any for length or relevance. Selection/trimming for a \
 specific job happens in a separate downstream step, not here.
 - Dates: preserve the source's original format as a string (e.g. "Feb 2025 \
 \u2013 Jul 2025"). Do not reformat or normalize.
+- "linkedin_url" / "github_url" / project "link": the source text may \
+include a "[Hyperlinks found in document]" block listing raw URLs \
+extracted from clickable links/icons that have no visible URL text (e.g. \
+a "LinkedIn" icon next to the name is a link, not visible text). Match \
+each URL to the right field by domain: a linkedin.com URL near the top of \
+the document (header/contact area) -> "linkedin_url"; a github.com URL in \
+the header that looks like a profile (e.g. github.com/username, no extra \
+path segments) -> "github_url"; a github.com URL appearing next to a \
+specific project entry (often with a repo path, or just a § icon next to \
+that project's title) -> that project's "link". Never fabricate a URL that \
+isn't in the hyperlinks block or visible text. Do not include the \
+"[Hyperlinks found in document]" block itself in any output field.
 """
 
 
