@@ -48,6 +48,31 @@ class LeadershipEntry(BaseModel):
     description: str
 
 
+class TailoredCV(BaseModel):
+    """
+    Same shape as MasterCV — this is intentional. The LaTeX renderer
+    (Phase 4) consumes whichever of these is handed to it without caring
+    which one it is. The distinction is purely about *content*: this is the
+    selected/trimmed/JD-keyword-aware subset produced by the tailoring step
+    (Phase 3), under a hard bullet/word budget, never with fabricated
+    content beyond what exists in the master CV.
+    """
+    name: str
+    location: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    github_url: Optional[str] = None
+
+    summary: Optional[str] = None
+    skills: dict[str, list[str]] = Field(default_factory=dict)
+
+    education: list[EducationEntry] = Field(default_factory=list)
+    experience: list[ExperienceEntry] = Field(default_factory=list)
+    projects: list[ProjectEntry] = Field(default_factory=list)
+    leadership: list[LeadershipEntry] = Field(default_factory=list)
+
+
 class MasterCV(BaseModel):
     name: str
     location: Optional[str] = None
