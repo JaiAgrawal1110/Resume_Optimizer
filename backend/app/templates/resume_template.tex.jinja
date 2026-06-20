@@ -1,0 +1,115 @@
+\documentclass[10pt, a4paper]{article}
+
+\usepackage[a4paper, top=0.4in, bottom=0.35in, left=0.55in, right=0.55in]{geometry}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{fontawesome5}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+
+\hypersetup{colorlinks=true, urlcolor=black, linkcolor=black}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+\pagestyle{empty}
+
+\titleformat{\section}
+  {\vspace{1pt}\bfseries\large}
+  {}{0em}{}
+  [\vspace{-4pt}\rule{\linewidth}{0.5pt}\vspace{1pt}]
+
+\titlespacing{\section}{0pt}{4pt}{2pt}
+
+\newcommand{\cventry}[5]{%
+  \textbf{#1} $\cdot$ \textit{#2} \ifx&#3&\else $\cdot$ #3\fi \hfill \textit{#4} \\
+  \vspace{-4pt}
+  #5
+  \vspace{2pt}
+}
+
+\newcommand{\projentry}[2]{%
+  \textbf{#1} \hfill {\small\textit{#2}}
+}
+
+\begin{document}
+
+% HEADER
+\begin{center}
+  {\LARGE\bfseries \VAR{name}} \\[3pt]
+  \small
+  \BLOCK{if location}\faMapMarker*\ \VAR{location} \quad\BLOCK{endif}
+  \BLOCK{if phone}\faPhone\ \VAR{phone} \quad\BLOCK{endif}
+  \BLOCK{if email}\faEnvelope\ \href{mailto:\VAR{email}}{\VAR{email}} \quad\BLOCK{endif}
+  \BLOCK{if linkedin_url}\faLinkedin\ \href{\VAR{linkedin_url}}{linkedin.com} \quad\BLOCK{endif}
+  \BLOCK{if github_url}\faGithub\ \href{\VAR{github_url}}{github.com}\BLOCK{endif}
+\end{center}
+
+\vspace{-4pt}
+
+\BLOCK{if summary}
+% SUMMARY
+\section{Summary}
+\VAR{summary}
+\BLOCK{endif}
+
+\BLOCK{if skills}
+% TECHNICAL SKILLS
+\section{Technical Skills}
+\begin{itemize}[leftmargin=*, noitemsep, topsep=0pt, itemsep=0pt, parsep=0pt]
+\BLOCK{for category, items in skills.items()}
+  \item \textbf{\VAR{category}:} \VAR{items|join(', ')}
+\BLOCK{endfor}
+\end{itemize}
+\BLOCK{endif}
+
+\BLOCK{if education}
+% EDUCATION
+\section{Education}
+\BLOCK{for edu in education}
+\textbf{\VAR{edu.degree}} \hfill \VAR{edu.start_date}\BLOCK{if edu.end_date} -- \VAR{edu.end_date}\BLOCK{endif} \\
+\VAR{edu.institution}\BLOCK{if edu.location}, \VAR{edu.location}\BLOCK{endif}\BLOCK{if edu.gpa} \hfill \VAR{edu.gpa}\BLOCK{endif}
+\BLOCK{endfor}
+\BLOCK{endif}
+
+\BLOCK{if experience}
+% EXPERIENCE
+\section{Experience}
+\BLOCK{for exp in experience}
+\cventry{\VAR{exp.title}}{\VAR{exp.organization}}{\VAR{exp.location|default('', true)}}{\VAR{exp.start_date|default('', true)}\BLOCK{if exp.end_date} -- \VAR{exp.end_date}\BLOCK{endif}}{%
+  \begin{itemize}[leftmargin=*, noitemsep, topsep=0pt, itemsep=0pt, parsep=0pt]
+  \BLOCK{for bullet in exp.bullets}
+    \item \VAR{bullet}
+  \BLOCK{endfor}
+  \end{itemize}
+}
+\BLOCK{endfor}
+\BLOCK{endif}
+
+\BLOCK{if projects}
+% PROJECTS
+\section{Projects}
+\BLOCK{for proj in projects}
+\projentry{\VAR{proj.name}}{\VAR{proj.tech_stack|join(', ')}}
+\begin{itemize}[leftmargin=*, noitemsep, topsep=1pt, itemsep=0pt, parsep=0pt]
+\BLOCK{for bullet in proj.bullets}
+  \item \VAR{bullet}
+\BLOCK{endfor}
+\end{itemize}
+\BLOCK{if not loop.last}\vspace{2pt}\BLOCK{endif}
+\BLOCK{endfor}
+\BLOCK{endif}
+
+\BLOCK{if leadership}
+% ACHIEVEMENTS
+\section{Achievements}
+\begin{itemize}[leftmargin=*, noitemsep, topsep=0pt, itemsep=0pt, parsep=0pt]
+\BLOCK{for lead in leadership}
+  \item \textbf{\VAR{lead.title}}\BLOCK{if lead.organization} --- \VAR{lead.organization}\BLOCK{endif}: \VAR{lead.description}
+\BLOCK{endfor}
+\end{itemize}
+\BLOCK{endif}
+
+\end{document}
