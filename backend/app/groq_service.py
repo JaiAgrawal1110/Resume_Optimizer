@@ -230,6 +230,15 @@ DROPPED in favor of more substantive roles, UNLESS the job description is \
 itself for freelance/contract/client-facing work, or the candidate has \
 too few other entries to fill the page. Don't include filler just to hit \
 a count.
+- PRIORITY RULE: a formal internship or employee role at a real company \
+(especially one with code review, production deployment, or a structured \
+team) is inherently stronger signal than freelance/self-employed work and \
+should be preferred and kept, even if the freelance entry has slightly \
+better surface-level tech-stack keyword overlap with the JD. Only drop a \
+formal internship/employee role in favor of freelance work if the \
+internship is genuinely irrelevant to the JD's domain (e.g. a hardware \
+internship for a pure frontend role) AND the freelance work is a strong, \
+specific match — not just generically present.
 - "projects": select EXACTLY 3 projects — the 3 most relevant to this job \
 description (prioritize domain/tech-stack overlap with the JD). For each, \
 keep EXACTLY 2 bullets that are the sharpest, most attention-grabbing \

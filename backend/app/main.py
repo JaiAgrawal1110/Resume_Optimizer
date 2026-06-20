@@ -3,7 +3,7 @@ load_dotenv()
 
 import json
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -88,23 +88,53 @@ def get_master_cv(db: Session = Depends(get_db)):
     return {"master_cv": json.loads(row.json_data), "updated_at": str(row.updated_at)}
 
 
-class TailorRequest(BaseModel):
-    job_description: str
-
-
 @app.post("/tailor")
-def tailor_resume(payload: TailorRequest, db: Session = Depends(get_db)):
+async def tailor_resume(
+    job_description: str = Form(None),
+    jd_file: UploadFile = File(None),
+    db: Session = Depends(get_db),
+):
     """
     Phase 3: loads the stored master_cv, sends it + the job description to
     Groq for selection/condensing under a one-page content budget and
     JD-keyword optimization, validates the result, logs it to
     generation_history, and returns the tailored JSON.
 
+    Accepts the job description EITHER as:
+    - a plain text form field `job_description`, OR
+    - a file upload `jd_file` (PDF/DOCX/TXT) — extracted the same way as
+      /upload-cv.
+    Provide exactly one.
+
     NOTE: this returns tailored JSON only — LaTeX rendering, PDF
     compilation, and the page-check loop are Phase 4-6, not built yet.
     """
-    if not payload.job_description or not payload.job_description.strip():
-        raise HTTPException(status_code=422, detail="job_description cannot be empty.")
+    has_text = bool(job_description and job_description.strip())
+    has_file = jd_file is not None and jd_file.filename
+
+    if has_text and has_file:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide either job_description text or jd_file, not both.",
+        )
+    if not has_text and not has_file:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide a job_description string or a jd_file upload.",
+        )
+
+    if has_file:
+        file_bytes = await jd_file.read()
+        try:
+            jd_text = cv_parser.extract_text(jd_file.filename, file_bytes)
+        except cv_parser.UnsupportedFileTypeError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except cv_parser.FileTooLargeError as e:
+            raise HTTPException(status_code=413, detail=str(e))
+        except cv_parser.EmptyContentError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    else:
+        jd_text = job_description.strip()
 
     row = db.query(MasterCVRow).filter(MasterCVRow.user_id == DEFAULT_USER_ID).first()
     if not row:
@@ -115,13 +145,13 @@ def tailor_resume(payload: TailorRequest, db: Session = Depends(get_db)):
     master_cv = MasterCV.model_validate(json.loads(row.json_data))
 
     try:
-        tailored_cv = groq_service.tailor_cv(master_cv, payload.job_description)
+        tailored_cv = groq_service.tailor_cv(master_cv, jd_text)
     except groq_service.TailoringError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
     history_row = GenerationHistoryRow(
         user_id=DEFAULT_USER_ID,
-        job_description=payload.job_description,
+        job_description=jd_text,
         tailored_json=tailored_cv.model_dump_json(),
     )
     db.add(history_row)
