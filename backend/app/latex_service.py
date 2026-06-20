@@ -166,3 +166,53 @@ def save_tex(tex_source: str, generation_id: int) -> Path:
     tex_path = GENERATED_DIR / f"resume_{generation_id}.tex"
     tex_path.write_text(tex_source, encoding="utf-8")
     return tex_path
+
+
+def _parse_first_error(log_text: str) -> str:
+    """Pulls the first '! ...' error line out of a pdflatex log, since the
+    full log is hundreds of lines of package-loading noise."""
+    for line in log_text.splitlines():
+        if line.startswith("!"):
+            return line.strip()
+    return "Unknown LaTeX compilation error (no '!' line found in log)."
+
+
+def compile_pdf(generation_id: int) -> Path:
+    """
+    Compiles generated/resume_{id}.tex to PDF via pdflatex, run twice (for
+    cross-references/hyperlinks to resolve), inside the generated/ dir.
+
+    Raises LatexRenderError with the first parsed error line on failure.
+    Returns the path to the produced PDF.
+    """
+    tex_path = GENERATED_DIR / f"resume_{generation_id}.tex"
+    if not tex_path.exists():
+        raise LatexRenderError(f"No .tex file found for generation {generation_id}.")
+
+    for _ in range(2):  # run twice: hyperref/refs need a second pass
+        result = subprocess.run(
+            ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", tex_path.name],
+            cwd=str(GENERATED_DIR),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+    pdf_path = GENERATED_DIR / f"resume_{generation_id}.pdf"
+
+    if result.returncode != 0 or not pdf_path.exists():
+        log_path = GENERATED_DIR / f"resume_{generation_id}.log"
+        log_text = log_path.read_text(encoding="utf-8", errors="ignore") if log_path.exists() else result.stdout
+        first_error = _parse_first_error(log_text)
+        raise LatexRenderError(f"pdflatex compilation failed: {first_error}")
+
+    return pdf_path
+
+
+def count_pdf_pages(pdf_path: Path) -> int:
+    """Counts pages in the compiled PDF via PyPDF2 (Phase 6 page-check loop
+    will use this to detect overflow)."""
+    from PyPDF2 import PdfReader
+
+    reader = PdfReader(str(pdf_path))
+    return len(reader.pages)

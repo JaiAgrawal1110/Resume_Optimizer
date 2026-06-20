@@ -2,13 +2,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import json
+import os
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app import cv_parser, groq_service
+from app import cv_parser, groq_service, latex_service
 from app.models import MasterCV
 from app.db import (
     init_db,
@@ -158,10 +159,46 @@ async def tailor_resume(
     db.commit()
     db.refresh(history_row)
 
+    # Phase 5: render to LaTeX and compile to PDF
+    page_count = None
+    pdf_warning = None
+    try:
+        tex_source = latex_service.render_tex(tailored_cv)
+        latex_service.save_tex(tex_source, history_row.id)
+        pdf_path = latex_service.compile_pdf(history_row.id)
+        page_count = latex_service.count_pdf_pages(pdf_path)
+        history_row.pdf_path = str(pdf_path)
+        db.add(history_row)
+        db.commit()
+    except latex_service.LatexRenderError as e:
+        # Don't fail the whole request — the tailored JSON is still valid
+        # and useful even if rendering broke. Surface the error instead.
+        pdf_warning = str(e)
+
     return {
         "generation_id": history_row.id,
         "tailored_cv": tailored_cv.model_dump(),
+        "pdf_ready": pdf_warning is None,
+        "page_count": page_count,
+        "pdf_warning": pdf_warning,
     }
+
+
+@app.get("/download/{generation_id}")
+def download_resume(generation_id: int, db: Session = Depends(get_db)):
+    from fastapi.responses import FileResponse
+
+    row = (
+        db.query(GenerationHistoryRow)
+        .filter(GenerationHistoryRow.id == generation_id, GenerationHistoryRow.user_id == DEFAULT_USER_ID)
+        .first()
+    )
+    if not row or not row.pdf_path:
+        raise HTTPException(status_code=404, detail="No compiled PDF found for this generation.")
+    pdf_path = row.pdf_path
+    if not os.path.exists(pdf_path):
+        raise HTTPException(status_code=404, detail="PDF file is missing from disk.")
+    return FileResponse(pdf_path, media_type="application/pdf", filename=f"resume_{generation_id}.pdf")
 
 
 @app.get("/history")
