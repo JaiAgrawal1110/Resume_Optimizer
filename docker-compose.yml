@@ -12,7 +12,6 @@ services:
       - "8000:8000"
     volumes:
       - ./backend/app:/app/app
-      - generated_files:/app/app/generated
       - ./backend/data:/app/data
     restart: unless-stopped
 
@@ -31,6 +30,3 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
-
-volumes:
-  generated_files:

@@ -150,6 +150,11 @@ async def tailor_resume(
     except groq_service.TailoringError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
+    # Deterministic safety net: guarantee >=3 projects and >=1 leadership
+    # entry (when the master CV has material for it) without depending on
+    # the AI reliably following the budget instructions.
+    tailored_cv = groq_service.ensure_min_content(tailored_cv, master_cv)
+
     history_row = GenerationHistoryRow(
         user_id=DEFAULT_USER_ID,
         job_description=jd_text,

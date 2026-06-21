@@ -243,16 +243,22 @@ internship for a pure frontend role) AND the freelance work is a strong, \
 specific match — not just generically present.
 - "projects": select EXACTLY 3 projects — the 3 most relevant to this job \
 description (prioritize domain/tech-stack overlap with the JD). For each, \
-keep EXACTLY 2 bullets that are the sharpest, most attention-grabbing \
-facts available (strongest metric, most impressive technical achievement, \
-or clearest scope/impact) — bullets chosen to make an employer want to \
-ask about the project, not just describe it.
-- "leadership": INCLUDE 1 entry whenever the master CV has any leadership \
-entries available — this section helps fill the page and adds a \
-well-rounded signal (initiative, scale, mentorship). Pick whichever \
-single entry is most relevant or most impressive if multiple exist. Only \
-leave it empty if the master CV genuinely has zero leadership entries, or \
-in the rare case the page is already completely full without it.
+keep 2-3 bullets — prefer 3 when the master CV's original entry has \
+enough strong, distinct content to support it. Choose the sharpest, most \
+attention-grabbing facts available (strongest metric, most impressive \
+technical achievement, architecture detail, or clearest scope/impact) — \
+bullets chosen to make an employer want to ask about the project, not \
+just describe it. Don't artificially shorten a bullet that's already \
+tight and informative — preserve real technical detail and metrics from \
+the master CV rather than over-compressing.
+- "leadership": include up to 3 entries when the master CV has multiple \
+that each add DISTINCT signal — e.g. one showing leadership/mentorship \
+scale, one showing technical ability under pressure (hackathons), one \
+showing communication skills (podcasts, public speaking, content). Don't \
+include near-duplicate entries that prove the same thing twice. This \
+section helps fill the page and adds well-rounded signal beyond pure \
+technical work. Only leave it empty if the master CV genuinely has zero \
+leadership entries, or the page is already completely full without it.
 - "education": keep as-is from the master CV, unchanged.
 
 KEYWORD / ATS OPTIMIZATION:
@@ -378,8 +384,8 @@ You are given the current tailored resume JSON and the job description it \
 targets. Output ONLY the corrected JSON object, same schema, no commentary.
 
 CUTTING PRIORITY (cut in this order until it's short enough):
-1. Remove the "leadership" section entirely first (set to []), if not \
-already empty.
+1. Reduce "leadership" entries one at a time (drop the least relevant \
+first; go to empty [] only if still too long after removing all of them).
 2. Drop the single least-relevant project (go from however many are \
 present down by one), keeping the strongest 2.
 3. Drop the single least-relevant experience entry, keeping at least 2.
@@ -503,6 +509,42 @@ def is_underfilled(tailored_cv: TailoredCV) -> bool:
     )
     has_leadership = len(tailored_cv.leadership) > 0
     return total_bullets < 10 or not has_leadership
+
+
+def ensure_min_content(tailored_cv: TailoredCV, master_cv: MasterCV) -> TailoredCV:
+    """
+    Deterministic, AI-free safety net: guarantees at least 3 projects and
+    at least 1 leadership entry (when the master CV has enough material),
+    by directly pulling unused entries from the master CV. This exists
+    because the AI doesn't always reliably follow the "exactly 3 projects"
+    / "include leadership" prompt instructions, and re-prompting isn't
+    guaranteed to fix it either — this makes the floor unconditional.
+    """
+    cv = tailored_cv.model_copy(deep=True)
+
+    # Pad projects up to 3 using master CV projects not already included,
+    # in master-CV order (their bullets already exist — just truncate to 2).
+    if len(cv.projects) < 3:
+        included_names = {p.name for p in cv.projects}
+        for proj in master_cv.projects:
+            if len(cv.projects) >= 3:
+                break
+            if proj.name not in included_names:
+                cv.projects.append(
+                    type(proj)(
+                        name=proj.name,
+                        tech_stack=proj.tech_stack,
+                        link=proj.link,
+                        bullets=proj.bullets[:2] if len(proj.bullets) > 2 else proj.bullets,
+                    )
+                )
+                included_names.add(proj.name)
+
+    # Add 1 leadership entry if empty and master CV has any.
+    if not cv.leadership and master_cv.leadership:
+        cv.leadership = [master_cv.leadership[0]]
+
+    return cv
 
 
 # ---------------------------------------------------------------------------
