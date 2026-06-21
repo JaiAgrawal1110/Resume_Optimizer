@@ -215,15 +215,17 @@ master CV (name, location, email, phone, linkedin_url, github_url, \
 summary, skills, education, experience, projects, leadership). No \
 markdown fences, no commentary.
 
-HARD CONTENT BUDGET (this is the most important constraint — the output \
-must plausibly fit one printed page):
-- "experience": select the 2-3 MOST relevant entries to this job \
-description — quality over quantity. Do not pad to 3 if only 2 are \
-genuinely strong matches; a focused 2 beats a padded 3. For each, keep \
-EXACTLY 2-3 of the strongest, most relevant bullets — condense/shorten \
-wording if needed, but every fact in a kept bullet must come from that \
-same bullet or entry in the master CV. Each bullet should be roughly \
-1-2 lines (~20-30 words).
+HARD CONTENT BUDGET (the output must fill close to one full printed page — \
+avoid leaving significant visible white space, but never spill onto a \
+second page):
+- "experience": prefer including 3 entries when the candidate has 3 or \
+more — use all 3 if the candidate only has 3 total. Only drop to 2 if a \
+third entry is genuinely irrelevant to this job description (e.g. \
+completely unrelated domain with nothing worth keeping). For each, keep \
+2-3 of the strongest, most relevant bullets — condense/shorten wording if \
+needed, but every fact in a kept bullet must come from that same bullet \
+or entry in the master CV. Each bullet should be roughly 1-2 lines \
+(~20-30 words).
 - Generic freelance/self-employed entries (vague client work with no \
 specific notable project, company, or technology match) should usually be \
 DROPPED in favor of more substantive roles, UNLESS the job description is \
@@ -245,18 +247,26 @@ keep EXACTLY 2 bullets that are the sharpest, most attention-grabbing \
 facts available (strongest metric, most impressive technical achievement, \
 or clearest scope/impact) — bullets chosen to make an employer want to \
 ask about the project, not just describe it.
-- "leadership": include this section ONLY if there's genuine remaining \
-space and a genuinely relevant entry — this is the FIRST section to cut \
-entirely (empty list) when content is tight, before trimming experience \
-or project bullets further. If included, keep it minimal (1 entry is \
-typical; never pad).
+- "leadership": INCLUDE 1 entry whenever the master CV has any leadership \
+entries available — this section helps fill the page and adds a \
+well-rounded signal (initiative, scale, mentorship). Pick whichever \
+single entry is most relevant or most impressive if multiple exist. Only \
+leave it empty if the master CV genuinely has zero leadership entries, or \
+in the rare case the page is already completely full without it.
 - "education": keep as-is from the master CV, unchanged.
 
 KEYWORD / ATS OPTIMIZATION:
-- "skills": filter the master CV's skills down to ONLY the categories and \
-items relevant to this job description, and reorder categories so the \
-most JD-relevant ones come first. Do not add any skill that isn't already \
-in the master CV — only select and reorder.
+- "skills": include the JD-relevant categories/items first, but DO NOT \
+reduce this down to only a narrow literal JD match — also include other \
+genuinely strong, broadly-valuable skills from the master CV that signal \
+general engineering competence, even if not explicitly named in the JD \
+(e.g. Docker, AWS/cloud, Git, FastAPI/REST APIs, databases, CI/CD-adjacent \
+tooling). Recruiters and ATS systems both respond well to a fuller, \
+still-credible skill set, not a stripped-down minimal list. Reorder so \
+the most JD-relevant categories come first, but aim to carry over most of \
+the master CV's skill categories rather than dropping most of them. Never \
+add a skill that isn't already in the master CV — only select, broaden \
+inclusion, and reorder.
 - "summary": keep the candidate's original summary largely intact (same \
 core claims and tone) — do NOT rewrite it to mirror the JD's voice. You \
 may make light edits ONLY to naturally work in 1-3 exact keywords/phrases \
@@ -414,6 +424,85 @@ def trim_cv(tailored_cv: TailoredCV, job_description: str) -> TailoredCV:
         return TailoredCV.model_validate(parsed)
     except (json.JSONDecodeError, ValidationError) as e:
         raise TailoringError(f"Trim attempt produced invalid JSON: {e}")
+
+
+EXPAND_SYSTEM_PROMPT = """You are editing a resume JSON that compiled to \
+ONE PAGE but is leaving NOTICEABLE WHITE SPACE — it's underfilled. Your \
+job is to add back genuine, truthful content from the master CV to better \
+fill the page, without overflowing to a second page.
+
+You are given the current tailored resume JSON, the FULL master CV JSON \
+(for additional real content to pull from), and the job description. \
+Output ONLY the corrected JSON object, same schema, no commentary.
+
+ADD CONTENT IN THIS PRIORITY ORDER (stop as soon as it's reasonably full):
+1. If "leadership" is empty and the master CV has any leadership entries, \
+add the single most relevant/impressive one.
+2. If there are only 2 "experience" entries and the master CV has a 3rd \
+real entry not yet included, add it (with 2 bullets).
+3. If any project only has 2 bullets and the master CV's original entry \
+for that project has a 3rd genuinely strong bullet, add it.
+4. As a last resort, add a 4th project from the master CV most relevant \
+to the JD that wasn't already included (2 bullets).
+
+Never fabricate — only pull in content that already exists verbatim (or \
+near-verbatim) in the master CV's experience/projects/leadership entries. \
+Stop adding once the page would plausibly be reasonably full; don't pad \
+with filler bullets.
+"""
+
+
+def _call_groq_expand(tailored_cv_json: str, master_cv_json: str, job_description: str) -> str:
+    client = get_client()
+    user_content = (
+        f"CURRENT TAILORED RESUME (one page, but underfilled):\n{tailored_cv_json}\n\n"
+        f"FULL MASTER CV (source of additional real content):\n{master_cv_json}\n\n"
+        f"JOB DESCRIPTION:\n{job_description}\n\n"
+        "Add back content per the priority order in the system prompt. Output only the expanded JSON object."
+    )
+    response = client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=[
+            {"role": "system", "content": EXPAND_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.2,
+        max_tokens=4000,
+    )
+    return response.choices[0].message.content
+
+
+def expand_cv(tailored_cv: TailoredCV, master_cv: MasterCV, job_description: str) -> TailoredCV:
+    """
+    Re-prompts Groq to add back genuine content from the master CV when a
+    successfully-compiled one-page resume is underfilled (noticeable white
+    space). Used by the Phase 6 fill-check in main.py. Raises
+    TailoringError if Groq returns invalid JSON (caller should treat this
+    as a failed expand attempt, not retry internally).
+    """
+    raw_response = _call_groq_expand(
+        tailored_cv.model_dump_json(), master_cv.model_dump_json(), job_description
+    )
+    try:
+        parsed = json.loads(raw_response)
+        return TailoredCV.model_validate(parsed)
+    except (json.JSONDecodeError, ValidationError) as e:
+        raise TailoringError(f"Expand attempt produced invalid JSON: {e}")
+
+
+def is_underfilled(tailored_cv: TailoredCV) -> bool:
+    """
+    Cheap heuristic for 'is this page leaving noticeable white space',
+    without needing actual PDF layout measurement: counts total bullets +
+    leadership entries against a rough threshold for a reasonably full
+    one-page resume.
+    """
+    total_bullets = sum(len(e.bullets) for e in tailored_cv.experience) + sum(
+        len(p.bullets) for p in tailored_cv.projects
+    )
+    has_leadership = len(tailored_cv.leadership) > 0
+    return total_bullets < 10 or not has_leadership
 
 
 # ---------------------------------------------------------------------------

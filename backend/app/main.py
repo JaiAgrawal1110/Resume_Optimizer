@@ -194,6 +194,36 @@ async def tailor_resume(
                 "trim attempts. Returning the best version achieved — consider "
                 "manually shortening the master CV for this role."
             )
+        elif groq_service.is_underfilled(tailored_cv):
+            # Page fits but leaves noticeable white space — add real content
+            # back from the master CV, then recompile. If that overflows,
+            # fall back to the trim loop once to bring it back to one page.
+            try:
+                expanded_cv = groq_service.expand_cv(tailored_cv, master_cv, jd_text)
+                tex_source = latex_service.render_tex(expanded_cv)
+                latex_service.save_tex(tex_source, history_row.id)
+                pdf_path = latex_service.compile_pdf(history_row.id)
+                new_page_count = latex_service.count_pdf_pages(pdf_path)
+
+                if new_page_count > 1:
+                    # Expansion overflowed — trim once to recover
+                    expanded_cv = groq_service.trim_cv(expanded_cv, jd_text)
+                    tex_source = latex_service.render_tex(expanded_cv)
+                    latex_service.save_tex(tex_source, history_row.id)
+                    pdf_path = latex_service.compile_pdf(history_row.id)
+                    new_page_count = latex_service.count_pdf_pages(pdf_path)
+
+                if new_page_count == 1:
+                    tailored_cv = expanded_cv
+                    page_count = new_page_count
+                    history_row.pdf_path = str(pdf_path)
+                    history_row.tailored_json = tailored_cv.model_dump_json()
+                    db.add(history_row)
+                    db.commit()
+                # else: expansion attempt didn't land cleanly on one page —
+                # silently keep the pre-expansion version already saved above.
+            except (groq_service.TailoringError, latex_service.LatexRenderError):
+                pass  # keep the pre-expansion version already saved above
     except latex_service.LatexRenderError as e:
         # Don't fail the whole request — the tailored JSON is still valid
         # and useful even if rendering broke. Surface the error instead.
