@@ -354,3 +354,129 @@ def tailor_cv(master_cv: MasterCV, job_description: str) -> TailoredCV:
         f"Failed to tailor CV after {1 + MAX_TAILORING_RETRIES} attempts. "
         f"Last error: {last_error}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 6: page-overflow trim loop
+# ---------------------------------------------------------------------------
+
+TRIM_SYSTEM_PROMPT = """You are editing a resume JSON that compiled to MORE \
+THAN ONE PAGE. Your job is to cut content to make it fit one page, while \
+keeping it truthful and well-formed.
+
+You are given the current tailored resume JSON and the job description it \
+targets. Output ONLY the corrected JSON object, same schema, no commentary.
+
+CUTTING PRIORITY (cut in this order until it's short enough):
+1. Remove the "leadership" section entirely first (set to []), if not \
+already empty.
+2. Drop the single least-relevant project (go from however many are \
+present down by one), keeping the strongest 2.
+3. Drop the single least-relevant experience entry, keeping at least 2.
+4. As a last resort, trim a bullet from the longest entries (one bullet \
+fewer each), but never go below 2 bullets per kept experience and 2 per \
+kept project.
+
+Never fabricate, never change facts in kept bullets — only remove content.
+"""
+
+
+def _call_groq_trim(tailored_cv_json: str, job_description: str) -> str:
+    client = get_client()
+    user_content = (
+        f"CURRENT TAILORED RESUME (too long, exceeds 1 page):\n{tailored_cv_json}\n\n"
+        f"JOB DESCRIPTION:\n{job_description}\n\n"
+        "Cut content per the priority order in the system prompt. Output only the trimmed JSON object."
+    )
+    response = client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=[
+            {"role": "system", "content": TRIM_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.2,
+        max_tokens=4000,
+    )
+    return response.choices[0].message.content
+
+
+def trim_cv(tailored_cv: TailoredCV, job_description: str) -> TailoredCV:
+    """
+    Re-prompts Groq to cut content from an already-tailored CV that
+    overflowed one page. Used by the Phase 6 page-check retry loop in
+    main.py. Raises TailoringError if Groq returns invalid JSON (caller
+    should treat this as a failed trim attempt, not retry internally).
+    """
+    raw_response = _call_groq_trim(tailored_cv.model_dump_json(), job_description)
+    try:
+        parsed = json.loads(raw_response)
+        return TailoredCV.model_validate(parsed)
+    except (json.JSONDecodeError, ValidationError) as e:
+        raise TailoringError(f"Trim attempt produced invalid JSON: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: ATS scoring
+# ---------------------------------------------------------------------------
+
+class ATSScoringError(Exception):
+    pass
+
+
+ATS_SYSTEM_PROMPT = """You are an ATS (Applicant Tracking System) keyword \
+match analyzer. Compare a resume against a job description and score how \
+well the resume's actual content matches the JD's key requirements and \
+keywords.
+
+Output ONLY a JSON object with this exact schema:
+{
+  "score": <integer 0-100>,
+  "matched_keywords": [<strings present in both resume and JD>],
+  "missing_keywords": [<important JD keywords/skills NOT found in the resume>],
+  "suggestions": [<2-4 short, specific, actionable suggestions to improve match>]
+}
+
+Score based on: overlap of hard skills/technologies, role-relevant \
+terminology, and seniority/responsibility alignment. Be honest and \
+specific — don't inflate the score. Suggestions should reference real \
+gaps, not generic advice.
+"""
+
+
+def _call_groq_ats(resume_text: str, job_description: str) -> str:
+    client = get_client()
+    user_content = (
+        f"RESUME TEXT:\n{resume_text}\n\nJOB DESCRIPTION:\n{job_description}\n\n"
+        "Score the match and output only the JSON object described in the system prompt."
+    )
+    response = client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=[
+            {"role": "system", "content": ATS_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.2,
+        max_tokens=1500,
+    )
+    return response.choices[0].message.content
+
+
+def score_ats(resume_text: str, job_description: str) -> dict:
+    """Returns {score, matched_keywords, missing_keywords, suggestions}."""
+    try:
+        raw_response = _call_groq_ats(resume_text, job_description)
+        parsed = json.loads(raw_response)
+    except Exception as e:
+        raise ATSScoringError(f"ATS scoring failed: {e}")
+
+    if "score" not in parsed:
+        raise ATSScoringError("ATS response missing required 'score' field.")
+
+    return {
+        "score": parsed.get("score"),
+        "matched_keywords": parsed.get("matched_keywords", []),
+        "missing_keywords": parsed.get("missing_keywords", []),
+        "suggestions": parsed.get("suggestions", []),
+    }

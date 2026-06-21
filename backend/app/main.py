@@ -159,17 +159,41 @@ async def tailor_resume(
     db.commit()
     db.refresh(history_row)
 
-    # Phase 5: render to LaTeX and compile to PDF
+    # Phase 5 + 6: render to LaTeX, compile to PDF, and if it overflows one
+    # page, re-prompt the AI to trim and recompile (up to 3 attempts).
     page_count = None
     pdf_warning = None
+    trim_attempts = 0
+    MAX_TRIM_ATTEMPTS = 3
+
     try:
         tex_source = latex_service.render_tex(tailored_cv)
         latex_service.save_tex(tex_source, history_row.id)
         pdf_path = latex_service.compile_pdf(history_row.id)
         page_count = latex_service.count_pdf_pages(pdf_path)
+
+        while page_count > 1 and trim_attempts < MAX_TRIM_ATTEMPTS:
+            trim_attempts += 1
+            try:
+                tailored_cv = groq_service.trim_cv(tailored_cv, jd_text)
+            except groq_service.TailoringError:
+                break  # trim attempt itself failed; stop trying, keep last good PDF
+            tex_source = latex_service.render_tex(tailored_cv)
+            latex_service.save_tex(tex_source, history_row.id)
+            pdf_path = latex_service.compile_pdf(history_row.id)
+            page_count = latex_service.count_pdf_pages(pdf_path)
+
         history_row.pdf_path = str(pdf_path)
+        history_row.tailored_json = tailored_cv.model_dump_json()  # may have been trimmed
         db.add(history_row)
         db.commit()
+
+        if page_count > 1:
+            pdf_warning = (
+                f"Resume still spans {page_count} pages after {trim_attempts} "
+                "trim attempts. Returning the best version achieved — consider "
+                "manually shortening the master CV for this role."
+            )
     except latex_service.LatexRenderError as e:
         # Don't fail the whole request — the tailored JSON is still valid
         # and useful even if rendering broke. Surface the error instead.
@@ -180,6 +204,7 @@ async def tailor_resume(
         "tailored_cv": tailored_cv.model_dump(),
         "pdf_ready": pdf_warning is None,
         "page_count": page_count,
+        "trim_attempts": trim_attempts,
         "pdf_warning": pdf_warning,
     }
 
@@ -223,6 +248,43 @@ def get_history(db: Session = Depends(get_db)):
     }
 
 
+@app.post("/ats-score/{generation_id}")
+def ats_score(generation_id: int, db: Session = Depends(get_db)):
+    """
+    Phase 7: scores a previously tailored resume against the job
+    description it was generated for. Looks up both from generation_history
+    by id (no need to re-paste the JD).
+    """
+    row = (
+        db.query(GenerationHistoryRow)
+        .filter(GenerationHistoryRow.id == generation_id, GenerationHistoryRow.user_id == DEFAULT_USER_ID)
+        .first()
+    )
+    if not row or not row.tailored_json:
+        raise HTTPException(status_code=404, detail="No tailored resume found for this generation.")
+
+    tailored_cv = MasterCV.model_validate(json.loads(row.tailored_json))
+    resume_text_parts = [tailored_cv.name, tailored_cv.summary or ""]
+    for category, items in tailored_cv.skills.items():
+        resume_text_parts.append(f"{category}: {', '.join(items)}")
+    for exp in tailored_cv.experience:
+        resume_text_parts.append(f"{exp.title} at {exp.organization}: " + " ".join(exp.bullets))
+    for proj in tailored_cv.projects:
+        resume_text_parts.append(f"{proj.name}: " + " ".join(proj.bullets))
+    resume_text = "\n".join(p for p in resume_text_parts if p)
+
+    try:
+        result = groq_service.score_ats(resume_text, row.job_description)
+    except groq_service.ATSScoringError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    row.ats_score = result["score"]
+    db.add(row)
+    db.commit()
+
+    return {"generation_id": generation_id, **result}
+
+
 # Routers will be added here as phases land:
-# Phase 4-6: latex_service + compilation + page-check loop
-# Phase 7: POST /ats-score
+# Phase 8: Frontend
+# Phase 9: Integration & hardening
