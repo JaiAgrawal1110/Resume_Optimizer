@@ -259,7 +259,6 @@ async def tailor_resume(
 @app.get("/download/{generation_id}")
 def download_resume(generation_id: int, db: Session = Depends(get_db)):
     from fastapi.responses import FileResponse
-
     row = (
         db.query(GenerationHistoryRow)
         .filter(GenerationHistoryRow.id == generation_id, GenerationHistoryRow.user_id == DEFAULT_USER_ID)
@@ -267,10 +266,31 @@ def download_resume(generation_id: int, db: Session = Depends(get_db)):
     )
     if not row or not row.pdf_path:
         raise HTTPException(status_code=404, detail="No compiled PDF found for this generation.")
-    pdf_path = row.pdf_path
-    if not os.path.exists(pdf_path):
+    if not os.path.exists(row.pdf_path):
         raise HTTPException(status_code=404, detail="PDF file is missing from disk.")
-    return FileResponse(pdf_path, media_type="application/pdf", filename=f"resume_{generation_id}.pdf")
+    return FileResponse(
+        row.pdf_path, media_type="application/pdf",
+        filename=f"resume_{generation_id}.pdf",
+        headers={"Content-Disposition": f"attachment; filename=resume_{generation_id}.pdf"}
+    )
+
+
+@app.get("/preview/{generation_id}")
+def preview_resume(generation_id: int, db: Session = Depends(get_db)):
+    from fastapi.responses import FileResponse
+    row = (
+        db.query(GenerationHistoryRow)
+        .filter(GenerationHistoryRow.id == generation_id, GenerationHistoryRow.user_id == DEFAULT_USER_ID)
+        .first()
+    )
+    if not row or not row.pdf_path:
+        raise HTTPException(status_code=404, detail="No compiled PDF found for this generation.")
+    if not os.path.exists(row.pdf_path):
+        raise HTTPException(status_code=404, detail="PDF file is missing from disk.")
+    return FileResponse(
+        row.pdf_path, media_type="application/pdf",
+        headers={"Content-Disposition": "inline"}
+    )
 
 
 @app.get("/history")
