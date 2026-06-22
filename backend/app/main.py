@@ -150,11 +150,6 @@ async def tailor_resume(
     except groq_service.TailoringError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
-    # Deterministic safety net: guarantee >=3 projects and >=1 leadership
-    # entry (when the master CV has material for it) without depending on
-    # the AI reliably following the budget instructions.
-    tailored_cv = groq_service.ensure_min_content(tailored_cv, master_cv)
-
     history_row = GenerationHistoryRow(
         user_id=DEFAULT_USER_ID,
         job_description=jd_text,
@@ -221,14 +216,31 @@ async def tailor_resume(
                 if new_page_count == 1:
                     tailored_cv = expanded_cv
                     page_count = new_page_count
-                    history_row.pdf_path = str(pdf_path)
-                    history_row.tailored_json = tailored_cv.model_dump_json()
-                    db.add(history_row)
-                    db.commit()
-                # else: expansion attempt didn't land cleanly on one page —
-                # silently keep the pre-expansion version already saved above.
+                # else: keep pre-expansion version
             except (groq_service.TailoringError, latex_service.LatexRenderError):
-                pass  # keep the pre-expansion version already saved above
+                pass
+
+        # Final deterministic guarantee: ensure min content is always met
+        # regardless of what the AI expand/trim loops did. Re-render and
+        # recompile only if content was actually added.
+        guaranteed_cv = groq_service.ensure_min_content(tailored_cv, master_cv)
+        if guaranteed_cv.model_dump_json() != tailored_cv.model_dump_json():
+            try:
+                tex_source = latex_service.render_tex(guaranteed_cv)
+                latex_service.save_tex(tex_source, history_row.id)
+                pdf_path = latex_service.compile_pdf(history_row.id)
+                page_count = latex_service.count_pdf_pages(pdf_path)
+                if page_count == 1:
+                    tailored_cv = guaranteed_cv
+                # if it overflowed (unlikely), keep previous version
+            except latex_service.LatexRenderError:
+                pass  # keep previous version
+
+        history_row.pdf_path = str(pdf_path)
+        history_row.tailored_json = tailored_cv.model_dump_json()
+        db.add(history_row)
+        db.commit()
+
     except latex_service.LatexRenderError as e:
         # Don't fail the whole request — the tailored JSON is still valid
         # and useful even if rendering broke. Surface the error instead.

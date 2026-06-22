@@ -526,10 +526,19 @@ def ensure_min_content(tailored_cv: TailoredCV, master_cv: MasterCV) -> Tailored
     # in master-CV order (their bullets already exist — just truncate to 2).
     if len(cv.projects) < 3:
         included_names = {p.name for p in cv.projects}
+
+        def already_included(master_name: str) -> bool:
+            # Match even when AI shortened the name (e.g. "ForgeMind AI"
+            # vs "ForgeMind AI — Industrial Machine Monitoring Platform")
+            for included in included_names:
+                if included in master_name or master_name in included:
+                    return True
+            return False
+
         for proj in master_cv.projects:
             if len(cv.projects) >= 3:
                 break
-            if proj.name not in included_names:
+            if not already_included(proj.name):
                 cv.projects.append(
                     type(proj)(
                         name=proj.name,
