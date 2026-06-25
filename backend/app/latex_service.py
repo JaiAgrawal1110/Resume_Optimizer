@@ -50,13 +50,43 @@ _LATEX_ESCAPE_MAP = [
     ("^", r"\textasciicircum{}"),
 ]
 
+# Unicode chars that pdflatex can't handle even with T1+lmodern.
+# Each maps to a plain ASCII/safe substitute that survives the
+# standard LaTeX escape pass cleanly (no backslashes in the value).
+# Anything that needs a real LaTeX macro gets a SAFE placeholder
+# that is replaced AFTER the escape pass.
+_UNICODE_TO_PLAIN = [
+    ("\u223c", "~"),       # ∼ tilde operator → plain tilde (then escaped to \textasciitilde{})
+    ("\u2248", "~="),      # ≈ → readable approximation
+    ("\u2013", "--"),      # – en-dash
+    ("\u2014", "---"),     # — em-dash
+    ("\u2019", "'"),       # ' right single quote
+    ("\u2018", "'"),       # ' left single quote
+    ("\u201c", "\""),      # " left double quote
+    ("\u201d", "\""),      # " right double quote
+    ("\u2026", "..."),     # … ellipsis
+    ("\u00b7", "."),       # · middle dot
+    ("\u00d7", "x"),       # × multiplication sign
+    ("\u00e9", "e"),       # é
+    ("\u00e8", "e"),       # è
+    ("\u00ea", "e"),       # ê
+    ("\u00fc", "u"),       # ü
+    ("\u00e4", "a"),       # ä
+    ("\u00f6", "o"),       # ö
+    ("\u2022", "*"),       # • bullet
+]
+
 
 def escape_latex(text: str | None) -> str:
-    """Escapes LaTeX special characters in a plain text string. None/empty
-    safe — returns ''."""
+    """Escapes LaTeX special characters in a plain text string.
+    Step 1: convert Unicode characters pdflatex can't handle into safe
+    ASCII equivalents. Step 2: apply standard LaTeX special char escaping.
+    None/empty safe — returns ''."""
     if not text:
         return ""
     result = text
+    for char, replacement in _UNICODE_TO_PLAIN:
+        result = result.replace(char, replacement)
     for char, replacement in _LATEX_ESCAPE_MAP:
         result = result.replace(char, replacement)
     return result

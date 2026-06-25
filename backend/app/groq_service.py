@@ -513,23 +513,47 @@ def is_underfilled(tailored_cv: TailoredCV) -> bool:
 
 def ensure_min_content(tailored_cv: TailoredCV, master_cv: MasterCV) -> TailoredCV:
     """
-    Deterministic, AI-free safety net: guarantees at least 3 projects and
-    at least 1 leadership entry (when the master CV has enough material),
-    by directly pulling unused entries from the master CV. This exists
-    because the AI doesn't always reliably follow the "exactly 3 projects"
-    / "include leadership" prompt instructions, and re-prompting isn't
-    guaranteed to fix it either — this makes the floor unconditional.
+    Deterministic, AI-free safety net that both guarantees minimum content
+    AND enforces hard page-budget caps so the PDF never overflows.
     """
     cv = tailored_cv.model_copy(deep=True)
 
-    # Pad projects up to 3 using master CV projects not already included,
-    # in master-CV order (their bullets already exist — just truncate to 2).
+    # ── HARD CAPS (applied first to prevent overflow) ──────────────────────
+
+    # Skills: max 4 categories, max 7 items each — skills section was
+    # eating half the page when AI returned all 8 categories
+    if cv.skills:
+        capped_skills = {}
+        for i, (cat, items) in enumerate(cv.skills.items()):
+            if i >= 4:
+                break
+            capped_skills[cat] = items[:7]
+        cv.skills = capped_skills
+
+    # Experience: max 3 entries, max 2 bullets each
+    cv.experience = cv.experience[:3]
+    for exp in cv.experience:
+        exp.bullets = exp.bullets[:2]
+
+    # Projects: max 3 entries, max 2 bullets each
+    cv.projects = cv.projects[:3]
+    for proj in cv.projects:
+        proj.bullets = proj.bullets[:2]
+
+    # Leadership: max 1 entry, description capped at 180 chars
+    if cv.leadership:
+        lead = cv.leadership[0]
+        if len(lead.description) > 180:
+            lead.description = lead.description[:177] + "..."
+        cv.leadership = [lead]
+
+    # ── MINIMUM CONTENT (pad up if underfilled after caps) ─────────────────
+
+    # Pad projects to 3
     if len(cv.projects) < 3:
         included_names = {p.name for p in cv.projects}
 
         def already_included(master_name: str) -> bool:
-            # Match even when AI shortened the name (e.g. "ForgeMind AI"
-            # vs "ForgeMind AI — Industrial Machine Monitoring Platform")
             for included in included_names:
                 if included in master_name or master_name in included:
                     return True
@@ -544,14 +568,22 @@ def ensure_min_content(tailored_cv: TailoredCV, master_cv: MasterCV) -> Tailored
                         name=proj.name,
                         tech_stack=proj.tech_stack,
                         link=proj.link,
-                        bullets=proj.bullets[:2] if len(proj.bullets) > 2 else proj.bullets,
+                        bullets=proj.bullets[:2],
                     )
                 )
                 included_names.add(proj.name)
 
-    # Add 1 leadership entry if empty and master CV has any.
+    # Add 1 leadership entry if empty
     if not cv.leadership and master_cv.leadership:
-        cv.leadership = [master_cv.leadership[0]]
+        lead = master_cv.leadership[0]
+        desc = lead.description
+        if len(desc) > 180:
+            desc = desc[:177] + "..."
+        cv.leadership = [type(lead)(
+            title=lead.title,
+            organization=lead.organization,
+            description=desc,
+        )]
 
     return cv
 
