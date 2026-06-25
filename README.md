@@ -15,10 +15,10 @@ self-corrected in a feedback loop until it fits one page.
 ## Screenshots
 
 ### Dashboard — ready to tailor
-![Dashboard empty state](screenshots/ui_empty.png)
+![Dashboard empty state](Screenshots/Dashboard (1).png)
 
 ### Dashboard — resume generated with PDF preview
-![Dashboard with result](screenshots/ui_with_result.png)
+![Dashboard with result](Screenshots/UI_with_result.png)
 
 ## The Hardest Problem: Guaranteeing Exactly One Full Page
 
