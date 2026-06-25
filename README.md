@@ -15,7 +15,7 @@ self-corrected in a feedback loop until it fits one page.
 ## Screenshots
 
 ### Dashboard — ready to tailor
-![Dashboard empty state](Screenshots/Dashboard (1).png)
+![Dashboard empty state](Screenshots/Dashboard.png)
 
 ### Dashboard — resume generated with PDF preview
 ![Dashboard with result](Screenshots/UI_with_result.png)
